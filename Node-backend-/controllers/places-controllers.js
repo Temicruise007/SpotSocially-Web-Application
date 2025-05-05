@@ -1,4 +1,4 @@
-const fs = require('fs'); //e can get the unlink method from the fs module to delete files from the file system
+const aws = require('aws-sdk'); // Import the AWS SDK
 
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
@@ -8,6 +8,13 @@ const getCoordsForAddress = require('../util/location');
 const Place = require('../models/place');
 const User = require('../models/user');
 
+const s3 = new aws.S3({
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  },
+  region: process.env.AWS_REGION
+});
 
 const getPlaceById = async (req, res, next) => {
   const placeId = req.params.pid; 
@@ -81,7 +88,7 @@ const createPlace = async (req, res, next) => {
     description,
     address,
     location: coordinates,
-    image: req.file.path,
+    image: req.file.location, //multer-s3 exposes the S3 URL here
     creator: req.userData.userId
   }); //new Place({ title, description, address, location: coordinates, image })
 
@@ -171,18 +178,27 @@ const updatePlace = async (req, res, next) => {
   place.title = title;
   place.description = description;
 
-  // If a new image file was provided, delete the old image and update the image path
+  // Only delete old image file if a new one was uploaded
   if (req.file) {
-    const oldImagePath = place.image;
-    place.image = req.file.path; // new image path from multer
+    const oldImagePath = place.image;  //full S3 URL string
+    try{
+      //extract the key (i.e. “1617971234567.jpeg”) from the URL
+      const url = new URL(oldImagePath);
+      const Key = url.pathname.substring(1); // drop the leading "/"
 
-    // Delete the old image file from the file system
-    fs.unlink(oldImagePath, err => {
-      if (err) {
-        console.error('Error deleting old image:', err);
-      }
-    });
+      // Delete the object(old-image) from S3
+      await s3.deleteObject({
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key
+      }).promise();
+    } catch(err){
+      console.error('Failed to delete S3 object:', err);
+    }
+
+    //now setting the place.image to the new S3 URL
+    place.image = req.file.location; //multer-s3 exposes the S3 URL here
   }
+
 
   //making sure updated information is saved in the database
   try{
@@ -227,6 +243,23 @@ const deletePlace = async (req, res, next) => {
 
   const imagePath = place.image; // Store the image path to delete it later
 
+  try { // Delete the image from AWS-S3 BUCKET
+    // extract the “Key” from the full URL
+    // e.g. from "https://spot-images.s3.amazonaws.com/1617971234567.jpeg"
+    // you want "1617971234567.jpeg"
+    const url = new URL(imagePath);
+    const Key = url.pathname.substring(1); // drop the leading '/'
+  
+    await s3
+      .deleteObject({
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key
+      })
+      .promise();
+  } catch (err) {
+    console.error('Failed to delete S3 object:', err);
+  }
+
   // Delete the place from the database and remove it from the user's places array
   // We use a session to ensure that both operations are executed or none of them
   // If one of them fails, then the other one will also be rolled back
@@ -243,10 +276,6 @@ const deletePlace = async (req, res, next) => {
     console.error("Error during operation: ", err); // Log the full error for internal monitoring
     return next(new HttpError('Something went wrong, please try again later.', 500)); // Send generic message to the client
   }
-
-  fs.unlink(imagePath, err => {
-    console.error("Error during operation: ", err); // Log the full error for internal monitoring
-  });
   
   res.status(200).json({ message: 'Deleted place.' });
 };

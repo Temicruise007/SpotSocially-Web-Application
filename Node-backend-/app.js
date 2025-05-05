@@ -61,27 +61,40 @@ app.use((req, res, next) => {
 });
 
 
-/* This block runs if any of the previous blocks
-threw an error. It takes the error, and sends a
-response with the error message and code. */
-/* This is a special function for handling errors. If any error is thrown in the app, 
-this function runs to catch it. if (res.headerSent) checks if a response has already been sent. 
-If yes, it moves to the next action.Otherwise, it sends a response with an error code 
-(error.code or 500 for "Server Error") and a message describing the problem. */
+// This block is for handling errors that happen in the app.
+// It checks if there is an error, and if so, it tries to delete any file
+// that was uploaded before the error happened.
+// If the file was uploaded, it tries to delete it from the server.
+// If the response headers are already sent (meaning the response is already being sent to the client),
+// it passes the error to the next error handler.
+// If the headers are not sent yet, it sets the status code based on the error code.
+// If the error code is a number, it uses that as the status code.
+// If the error code is 'LIMIT_FILE_SIZE', it sets the status to 413 (which means "Payload Too Large").
+// Finally, it sends a JSON response with the error message or a default message.
+// This is a way to handle errors in a clean and organized way.
 app.use((error, req, res, next) => {
+  // If multer wrote a file before error, try to remove it.
   if (req.file) {
-    fs.unlink(req.file.path, (err) => {
-      if (err) {
-        console.log(err);
-      }
-    });
+    fs.unlink(req.file.path, () => {});
   }
+  // If headers are already sent, delegate to the default Express handler
   if (res.headerSent) {
     return next(error);
   }
-  res.status(error.code || 500)
-  res.json({message: error.message || 'An unknown error occurred!'});
+
+  // Map error.code to a proper HTTP status
+  let status = 500;
+  if (typeof error.code === 'number') {
+    status = error.code;            // your HttpError codes
+  } else if (error.code === 'LIMIT_FILE_SIZE') {
+    status = 413;                   // multer file-too-large
+  }
+
+  res
+    .status(status)
+    .json({ message: error.message || 'An unknown error occurred!' });
 });
+
 
 
 mongoose
