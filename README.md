@@ -46,8 +46,8 @@ AWS_REGION=us-east-1
 ```
 
 ```
-REACT_APP_BACKEND_URL=http://localhost:5000/api
-REACT_APP_ASSET_URL=http://localhost:5000/uploads/images
+REACT_APP_BACKEND_URL = your_backend_url
+REACT_APP_ASSET_URL = your_app_asset_url
 REACT_APP_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 ```
 
